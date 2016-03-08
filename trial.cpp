@@ -241,7 +241,7 @@ void getTag( TDF_Label& label, std::string& aTag )
     ostr.clear();
     
     TDF_Label nlab = label.Father();
-    int q = 1;
+
     while( !nlab.IsNull() )
     {
         rtag.append( 1, ':' );
@@ -265,6 +265,32 @@ void getTag( TDF_Label& label, std::string& aTag )
     return;
 }
 
+
+bool getColor( DATA& data, TDF_Label label, Quantity_Color& color )
+{
+    while( true )
+    {
+        if( data.m_color->IsSet( label, XCAFDoc_ColorGen ) )
+        {
+            data.m_color->GetColor( label, XCAFDoc_ColorGen, color );
+            return true;
+        }
+        else if( data.m_color->IsSet( label, XCAFDoc_ColorSurf ) )
+        {
+            data.m_color->GetColor( label, XCAFDoc_ColorSurf, color );
+            return true;
+        }
+
+        label = label.Father();
+        
+        if( label.IsNull() )
+            break;
+    };
+    
+    return false;
+}
+
+
 bool processFace( const TopoDS_Face& face, DATA& data, Quantity_Color* color,
                   const std::string& id, SGNODE* parent );
 
@@ -275,33 +301,15 @@ bool handleSolid( TDF_Label& aLabel, DATA& data, int tlvl, SGNODE* parent )
 
     TopExp_Explorer tree( data.m_assy->GetShape( aLabel ), TopAbs_FACE );
     bool ret = false;
-    
     bool hasColor;
-    XCAFDoc_ColorType ctype;
-   
-    if( data.m_color->IsSet( aLabel, XCAFDoc_ColorGen ) )
-    {
-        ctype = XCAFDoc_ColorGen;
-        hasColor = true;
-    }
-    else if( data.m_color->IsSet( aLabel, XCAFDoc_ColorSurf ) )
-    {
-        ctype = XCAFDoc_ColorSurf;
-        hasColor = true;
-    }
-    
     Quantity_Color col;
     Quantity_Color* lcolor = NULL;
     int subFace = 0;
+    hasColor = getColor( data, aLabel, col );
     
     if( hasColor )
-    {
-        if( data.m_color->GetColor( aLabel, ctype, col ) )
-            lcolor = &col;
-        else
-            hasColor = false;
-    }
-    
+        lcolor = &col;
+
     for(; tree.More(); tree.Next() )
     {
         const TopoDS_Shape& shape = tree.Current();
@@ -344,20 +352,13 @@ bool inspect( DATA& data, TopoDS_Shape& shape, int id, int tlvl, SGNODE* parent 
         else
             std::cout << "[no subs], ";
         
-        bool hasColor = data.m_color->IsSet( aLabel, XCAFDoc_ColorGen );
         Quantity_Color col;
+        bool hasColor = getColor( data, aLabel, col );
         
         if( hasColor )
         {
-            std::cout << "[colored ";
-            
-            if( !data.m_color->GetColor( aLabel, XCAFDoc_ColorGen, col ) )
-            {
-                std::cout << "(none)]";
-                hasColor = false;
-            }
-            else
-                std::cout << "(" << col.Red() << ", " << col.Green() << ", " << col.Blue() << ")]";
+            std::cout << "[colored " << "(" << col.Red() << ", ";
+            std::cout << col.Green() << ", " << col.Blue() << ")]";
         }
         else
             std::cout << "[uncolored]";
