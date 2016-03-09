@@ -758,7 +758,7 @@ int main( int argc, char** argv )
 
     // on success write out a VRML file
     if( ret )
-        S3D::WriteVRML( "test.wrl", true, data.scene, true, true );
+        S3D::WriteVRML( "test.wrl", true, data.scene, false, true );
 
     return 0;
 }
