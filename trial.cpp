@@ -50,9 +50,11 @@
 #include "plugins/3dapi/ifsg_all.h"
 
 // precision for mesh creation; this should be good enough for ECAD viewing
-#define USER_PREC (0.02)
+#define USER_PREC (0.07)
 // angular deflection for meshing
-#define USER_ANGLE (0.17453278)
+// 10 deg (36 faces per circle) = 0.17453293
+// 20 deg (18 faces per circle) = 0.34906585
+#define USER_ANGLE (0.34906585)
 
 struct DATA
 {
