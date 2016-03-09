@@ -296,13 +296,15 @@ bool getColor( DATA& data, TDF_Label label, Quantity_Color& color )
 bool processFace( const TopoDS_Face& face, DATA& data, Quantity_Color* color,
                   const std::string& id, SGNODE* parent );
 
-bool handleSolid( TDF_Label& aLabel, DATA& data, int tlvl, SGNODE* parent )
+bool handleSubSolid( const TopoDS_Shape& aShape, DATA& data, int tlvl, SGNODE* parent )
 {
     std::string id;
+    TDF_Label aLabel;
+    
+    data.m_assy->FindShape( aShape, aLabel );    
     getTag( aLabel, id );
-
-    TopExp_Explorer tree( data.m_assy->GetShape( aLabel ), TopAbs_FACE );
     bool ret = false;
+    TopExp_Explorer tree( aShape, TopAbs_FACE );
     bool hasColor;
     Quantity_Color col;
     Quantity_Color* lcolor = NULL;
@@ -326,7 +328,64 @@ bool handleSolid( TDF_Label& aLabel, DATA& data, int tlvl, SGNODE* parent )
             ret = true;
         }
     }
+        
+    return ret;
+}
+
+
+bool handleSolid( TDF_Label& aLabel, DATA& data, int tlvl, SGNODE* parent )
+{
+    std::string id;
+    getTag( aLabel, id );
+
+    bool ret = false;
+    TopoDS_Shape aShape;
+    data.m_assy->GetShape( aLabel, aShape );
     
+    if( data.m_assy->IsTopLevel( aLabel ) )
+    {
+        TopExp_Explorer tree( aShape, TopAbs_SOLID );
+
+        for(; tree.More(); tree.Next() )
+        {
+            const TopoDS_Shape& shape = tree.Current();
+            TDF_Label label;
+            
+            if( !data.m_assy->FindShape( shape, label ) )
+                continue;
+            
+            if( handleSubSolid( shape, data, tlvl+1, parent ) )
+                ret = true;
+        }
+    }
+    else
+    {
+        TopExp_Explorer tree( data.m_assy->GetShape( aLabel ), TopAbs_FACE );
+        bool hasColor;
+        Quantity_Color col;
+        Quantity_Color* lcolor = NULL;
+        int subFace = 0;
+        hasColor = getColor( data, aLabel, col );
+        
+        if( hasColor )
+            lcolor = &col;
+
+        for(; tree.More(); tree.Next() )
+        {
+            const TopoDS_Shape& shape = tree.Current();
+            std::ostringstream ostr;
+            ostr << id << "-" << subFace;
+            std::string locID = ostr.str();
+
+            if( shape.ShapeType() == TopAbs_FACE && processFace( TopoDS::Face( shape ),
+                data, lcolor, locID, parent ) )
+            {
+                ++subFace;
+                ret = true;
+            }
+        }
+    }
+        
     return ret;
 }
 
