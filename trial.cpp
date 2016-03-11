@@ -56,6 +56,54 @@
 // 20 deg (18 faces per circle) = 0.34906585
 #define USER_ANGLE (0.34906585)
 
+
+std::string getShapeType( TopAbs_ShapeEnum stype )
+{
+    switch( stype )
+    {
+        case TopAbs_COMPOUND:
+            return "COMPOUND";
+            break;
+            
+        case TopAbs_COMPSOLID:
+            return "COMPSOLID";
+            break;
+            
+        case TopAbs_SOLID:
+            return "SOLID";
+            break;
+            
+        case TopAbs_SHELL:
+            return "SHELL";
+            break;
+            
+        case TopAbs_FACE:
+            return "FACE";
+            break;
+            
+        case TopAbs_WIRE:
+            return "WIRE";
+            break;
+            
+        case TopAbs_EDGE:
+            return "EDGE";
+            break;
+            
+        case TopAbs_VERTEX:
+            return "VERTEX";
+            break;
+            
+        case TopAbs_SHAPE:
+            return "SHAPE";
+            break;
+            
+        default:
+            break;
+    }
+    
+    return "UNKNOWN";
+}
+
 struct DATA
 {
     Handle( TDocStd_Document ) m_doc;
@@ -333,264 +381,88 @@ bool handleSubSolid( const TopoDS_Shape& aShape, DATA& data, int tlvl, SGNODE* p
 }
 
 
-bool handleSolid( TDF_Label& aLabel, DATA& data, int tlvl, SGNODE* parent )
-{
-    std::string id;
-    getTag( aLabel, id );
-
-    bool ret = false;
-    TopoDS_Shape aShape;
-    data.m_assy->GetShape( aLabel, aShape );
-    
-    if( data.m_assy->IsTopLevel( aLabel ) )
-    {
-        TopExp_Explorer tree( aShape, TopAbs_SOLID );
-
-        for(; tree.More(); tree.Next() )
-        {
-            const TopoDS_Shape& shape = tree.Current();
-            TDF_Label label;
-            
-            if( !data.m_assy->FindShape( shape, label ) )
-                continue;
-            
-            if( handleSubSolid( shape, data, tlvl+1, parent ) )
-                ret = true;
-        }
-    }
-    else
-    {
-        TopExp_Explorer tree( data.m_assy->GetShape( aLabel ), TopAbs_FACE );
-        bool hasColor;
-        Quantity_Color col;
-        Quantity_Color* lcolor = NULL;
-        int subFace = 0;
-        hasColor = getColor( data, aLabel, col );
-        
-        if( hasColor )
-            lcolor = &col;
-
-        for(; tree.More(); tree.Next() )
-        {
-            const TopoDS_Shape& shape = tree.Current();
-            std::ostringstream ostr;
-            ostr << id << "-" << subFace;
-            std::string locID = ostr.str();
-
-            if( shape.ShapeType() == TopAbs_FACE && processFace( TopoDS::Face( shape ),
-                data, lcolor, locID, parent ) )
-            {
-                ++subFace;
-                ret = true;
-            }
-        }
-    }
-        
-    return ret;
-}
-
-
 bool inspect( DATA& data, TopoDS_Shape& shape, int id, int tlvl, SGNODE* parent )
 {
-        // note: tlvl = tab level
+    // note: tlvl = tab level
+    TDF_Label aLabel = data.m_assy->FindShape( shape, Standard_False );
     
-        TDF_Label aLabel = data.m_assy->FindShape( shape, Standard_False );
-        
-        if( aLabel.IsNull() )
-            return false;
-        
-        tab( tlvl );
-        std::cout << "Shape " << id << "(";
-        std::string ltag;
-        getTag( aLabel, ltag );
-        std::cout << ltag << ") : ";
-        
-        TDF_LabelSequence subs;
-        Standard_Boolean hassubs = data.m_assy->GetSubShapes( aLabel, subs ); 
-        
-        if( hassubs )
-            std::cout << "[has " << subs.Length() << " subs], ";
-        else
-            std::cout << "[no subs], ";
-        
-        Quantity_Color col;
-        bool hasColor = getColor( data, aLabel, col );
-        
-        if( hasColor )
-        {
-            std::cout << "[colored " << "(" << col.Red() << ", ";
-            std::cout << col.Green() << ", " << col.Blue() << ")]";
-        }
-        else
-            std::cout << "[uncolored]";
-        
-        std::cout << "[type ";
-        TopAbs_ShapeEnum stype = shape.ShapeType();
-        
-        switch( stype )
-        {
-            case TopAbs_COMPOUND:
-                std::cout << "compound]\n";
-                break;
-                
-            case TopAbs_COMPSOLID:
-                std::cout << "compound solid]\n";
-                break;
-                
-            case TopAbs_SOLID:
-                std::cout << "solid]\n";
-                break;
-                
-            case TopAbs_SHELL:
-                std::cout << "shell]\n";
-                break;
-                
-            case TopAbs_FACE:
-                std::cout << "face]\n";
-                break;
-                
-            case TopAbs_WIRE:
-                std::cout << "wire]\n";
-                break;
-                
-            case TopAbs_EDGE:
-                std::cout << "edge]\n";
-                break;
-                
-            case TopAbs_VERTEX:
-                std::cout << "vertex]\n";
-                break;
-                
-            case TopAbs_SHAPE:
-                std::cout << "shape]\n";
-                break;
-                
-            default:
-                std::cout << "UNKNOWN]\n";
-                break;
-        }
-        
+    if( aLabel.IsNull() )
+        return false;
+
+    bool ret = false;
+
+    if( aLabel.HasChild() )
+    {
+        std::string partID;
+        getTag( aLabel, partID );
+
         TopLoc_Location loc = shape.Location();
         gp_Trsf T = loc.Transformation();
         gp_XYZ coord = T.TranslationPart();
         tab( tlvl );
         std::cout << " loc( type " << shape.ShapeType() << "): ";
         std::cout << coord.X() << ", " << coord.Y() << ", " << coord.Z() << "\n";
-        bool ret = false;
+        tab( tlvl );
+        std::cout << " ID: " << partID << "\n";
 
-        if( hassubs )
+        IFSG_TRANSFORM childNode( parent );
+
+        childNode.SetTranslation( SGPOINT( coord.X(), coord.Y(), coord.Z() ) );
+
+        if( gp_Identity != T.Form() )
         {
-            IFSG_TRANSFORM childNode( parent );
-            
-            if( gp_Identity != T.Form() )
-            {
-                // data must be transformed
-                gp_XYZ axis;
-                Standard_Real angle;
+            // data must be transformed
+            gp_XYZ axis;
+            Standard_Real angle;
 
-                if( T.GetRotation( axis, angle ) )
-                    childNode.SetRotation( SGVECTOR( axis.X(), axis.Y(), axis.Z() ), angle );
+            if( T.GetRotation( axis, angle ) )
+                childNode.SetRotation( SGVECTOR( axis.X(), axis.Y(), axis.Z() ), angle );
+        }
+        
+        SGNODE* shapeRef = data.GetShape( partID );
+        
+        if( NULL != shapeRef )
+        {
+            S3D::AddSGNodeRef( childNode.GetRawPtr(), shapeRef );
+            return true;
+        }
 
-                childNode.SetTranslation( SGPOINT( coord.X(), coord.Y(), coord.Z() ) );
-            }
+        IFSG_TRANSFORM subNode( childNode.GetRawPtr() );
+
+        TDF_ChildIterator it;
+        int sid = 0;
+        
+        for( it.Initialize( aLabel ); it.More(); it.Next() )
+        {
+            TopoDS_Shape subShape;
             
-            // process sub shapes
-            int nsub = subs.Length();
-            int sid = 1;
-            
-            while( sid <= nsub )
-            {
-                TopoDS_Shape sshape = data.m_assy->GetShape( subs.Value(sid) );
-                
-                if ( sshape.IsNull() )
-                {
-                    ++sid;
-                    continue;
-                }
-                
-                if( inspect( data, sshape, sid, tlvl + 1, childNode.GetRawPtr() ) )
-                    ret = true;
-                
-                ++sid;
-            };
-            
-            if( ret )
-            {
-                S3D::AddSGNodeChild( parent, childNode.GetRawPtr() );
+            if( !data.m_assy->GetShape( it.Value(), subShape ) )
+                continue;
+
+            if( inspect( data, subShape, sid, tlvl+1, subNode.GetRawPtr() ) )
                 ret = true;
-            }
-            else
-            {
-                childNode.Destroy();
-            }
+            
+            ++sid;
+        }
 
+        if( ret )
+        {
+            S3D::AddSGNodeChild( childNode.GetRawPtr(), subNode.GetRawPtr() );
+            data.shapes.insert( std::pair< std::string, SGNODE* >( partID, subNode.GetRawPtr() ) );
         }
         else
         {
-            switch( stype )
-            {
-                case TopAbs_FACE:
-                    do
-                    {
-                        Quantity_Color* cp = NULL;
-                        
-                        if( hasColor )
-                            cp = &col;
-                        
-                        std::cout << "(processing FACE)\n";
-                        
-                        if( processFace( TopoDS::Face( shape ), data, cp, ltag, parent ) )
-                            ret = true;
-                        
-                    } while(0);
-                    
-                    break;
-                    
-                case TopAbs_COMPSOLID:
-                case TopAbs_COMPOUND:
-                case TopAbs_SOLID:
-                    do
-                    {
-                        // TBD: COMPOUND: create a parent and process children
-                        tab( tlvl );
-                        std::cout << "(processing SOLID)\n";
-
-                        IFSG_TRANSFORM childNode( parent );
-                        
-                        childNode.SetTranslation( SGPOINT( coord.X(), coord.Y(), coord.Z() ) );
-                        
-                        if( gp_Identity != T.Form() )
-                        {
-                            // data must be transformed
-                            gp_XYZ axis;
-                            Standard_Real angle;
-
-                            if( T.GetRotation( axis, angle ) )
-                                childNode.SetRotation( SGVECTOR( axis.X(), axis.Y(), axis.Z() ),
-                                    angle );
-                        }
-
-                        if( handleSolid( aLabel, data, tlvl, childNode.GetRawPtr() ) )
-                        {
-                            S3D::AddSGNodeChild( parent, childNode.GetRawPtr() );
-                            ret = true;
-                        }
-                        else
-                        {
-                            childNode.Destroy();
-                        }
-
-                    } while( 0 );
-                    
-                    break;
-                    
-                default:
-                    break;
-            }
-
+            subNode.Destroy();
+            childNode.Destroy();
         }
+    }
+    else
+    {
+        if( handleSubSolid( shape, data, tlvl+1, parent ) )
+            ret = true;
+    }
         
-        return ret;
+    return ret;
 }
 
 
@@ -726,10 +598,8 @@ int main( int argc, char** argv )
     data.m_assy = XCAFDoc_DocumentTool::ShapeTool( data.m_doc->Main() );
     data.m_color = XCAFDoc_DocumentTool::ColorTool( data.m_doc->Main() );
 
-    // retrieve all shapes at this level
+    // retrieve all free shapes
     TDF_LabelSequence frshapes; 
-    // Note: GetShapes appears to repeat everything, so use GetFreeShapes
-    //data.m_assy->GetShapes(frshapes);
     data.m_assy->GetFreeShapes( frshapes );
     
     int nshapes = frshapes.Length();
@@ -756,9 +626,14 @@ int main( int argc, char** argv )
         ++id;
     };
 
+    // set to true to make extensive use of DEF/USE; otherwise
+    // the output is a flat hierarchy compatible with the
+    // legacy kicad VRML parser
+    bool useHierarchy = true;
+
     // on success write out a VRML file
     if( ret )
-        S3D::WriteVRML( "test.wrl", true, data.scene, false, true );
+        S3D::WriteVRML( "test.wrl", true, data.scene, useHierarchy, true );
 
     return 0;
 }
@@ -872,8 +747,6 @@ bool processFace( const TopoDS_Face& face, DATA& data, Quantity_Color* color,
         indices.push_back( b );
         indices.push_back( c );
 
-        // XXX - it may be better to execute the equivalent of
-        // renderBoth in another code module
         if( data.renderBoth )
         {
             indices.push_back( c );
