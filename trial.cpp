@@ -58,6 +58,24 @@
 #define USER_ANGLE (0.34906585)
 
 
+/*
+ *  OCE Topological Model
+ * 
+ *  Topological entities are:
+ *      TopoDS_Shape: the base entity type
+ *      TopoDS_Compound: the top level entity type; may contain all lower entity types
+ *      TopoDS_CompSolid: contains TopoDS_Solid types
+ *      TopoDS_Solid: Shells forming a solid (not clear if it may contain free Faces)
+ *      TopoDS_Shell: contains Faces
+ *  
+ *  There are lower level entities which are not of interest to non-MCAD applications
+ * 
+ *  Each entity type which may represent an assembly may contain Children. If
+ *  an entity type is not an assembly then it shall contain objects but no Children
+ *  and the TopExp_Explorer tool must be used to traverse the structure.
+ * 
+ */
+
 std::string getShapeType( TopAbs_ShapeEnum stype )
 {
     switch( stype )
@@ -458,39 +476,33 @@ bool processSolid( DATA& data, const TopoDS_Shape& shape, int tlvl,
 
     TDF_Label label;
     data.m_assy->FindShape( shape, label );
-
+    
     Quantity_Color col;
     Quantity_Color* lcolor = NULL;
     
     if( getColor( data, label, col ) )
         lcolor = &col;
-
+    
+    IFSG_TRANSFORM childNode( parent );
+    SGNODE* pptr = childNode.GetRawPtr();
+   
     for( ; tree.More(); tree.Next() )
     {
         const TopoDS_Shape& subShape = tree.Current();
 
-        if( processShell( data, subShape, lcolor, tlvl + 1, parent, items ) )
+        if( processShell( data, subShape, lcolor, tlvl + 1, pptr, items ) )
             ret = true;
 
         ++nShells;
     }
 
-    // handle faces not associated with shells
-    tree.Init( shape, TopAbs_FACE, TopAbs_SHELL );
-    int nFaces = 0;
-
-    for( ; tree.More(); tree.Next() )
-    {
-        const TopoDS_Face& face = TopoDS::Face( tree.Current() );
-
-        if( processFace( face, data, lcolor, "", parent, items ) )
-            ret = true;
-
-        ++nFaces;
-    }
-    
     tab( tlvl );
-    std::cout << "* " << nShells << " shells, " << nFaces << " faces\n";
+    std::cout << "* " << nShells << " shells\n";
+    
+    if( !ret )
+        childNode.Destroy();
+    else if( NULL != items )
+        items->push_back( pptr );
 
     return ret;
 }
@@ -504,11 +516,14 @@ bool processCompsolid( DATA& data, const TopoDS_Shape& shape, int tlvl,
     TopExp_Explorer tree;
     tree.Init( shape, TopAbs_SOLID );
 
+    IFSG_TRANSFORM childNode( parent );
+    SGNODE* pptr = childNode.GetRawPtr();
+
     for( ; tree.More(); tree.Next() )
     {
         const TopoDS_Shape& subShape = tree.Current();
 
-        if( processSolid( data, subShape, tlvl + 1, parent, items ) )
+        if( processSolid( data, subShape, tlvl + 1, pptr, items ) )
             ret = true;
 
         ++nSolids;
@@ -516,6 +531,11 @@ bool processCompsolid( DATA& data, const TopoDS_Shape& shape, int tlvl,
     
     tab( tlvl );
     std::cout << "* " << nSolids << " solids\n";
+
+    if( !ret )
+        childNode.Destroy();
+    else if( NULL != items )
+        items->push_back( pptr );
 
     return ret;
 }
@@ -529,12 +549,15 @@ bool processCompound( DATA& data, const TopoDS_Shape& shape, int tlvl,
     bool ret = false;
     TopExp_Explorer tree;
     tree.Init( shape, TopAbs_COMPSOLID );
+    
+    IFSG_TRANSFORM childNode( parent );
+    SGNODE* pptr = childNode.GetRawPtr();
 
     for( ; tree.More(); tree.Next() )
     {
         const TopoDS_Shape& subShape = tree.Current();
 
-        if( processCompsolid( data, subShape, tlvl + 1, parent, items ) )
+        if( processCompsolid( data, subShape, tlvl + 1, pptr, items ) )
             ret = true;
 
         ++nCSolids;
@@ -550,7 +573,7 @@ bool processCompound( DATA& data, const TopoDS_Shape& shape, int tlvl,
     {
         const TopoDS_Shape& subShape = tree.Current();
 
-        if( processSolid( data, subShape, tlvl + 1, parent, items ) )
+        if( processSolid( data, subShape, tlvl + 1, pptr, items ) )
             ret = true;
 
         ++nSolids;
@@ -567,7 +590,7 @@ bool processCompound( DATA& data, const TopoDS_Shape& shape, int tlvl,
         const TopoDS_Shape& subShape = tree.Current();
 
         // XXX - do we have a color?
-        if( processShell( data, subShape, NULL, tlvl + 1, parent, items ) )
+        if( processShell( data, subShape, NULL, tlvl + 1, pptr, items ) )
             ret = true;
 
         ++nShells;
@@ -576,27 +599,27 @@ bool processCompound( DATA& data, const TopoDS_Shape& shape, int tlvl,
     tab( tlvl );
     std::cout << "* " << nShells << " shells\n";
 
-    /*
     int nFaces = 0;
-    tree.Init( shape, TopAbs_FACE, TopAbs_SOLID );
+    tree.Init( shape, TopAbs_FACE, TopAbs_SHELL );
 
     for( ; tree.More(); tree.Next() )
     {
         const TopoDS_Shape& subShape = tree.Current();
 
         // XXX - do we have a color?
-        if( processFace( TopoDS::Face( subShape ), data, NULL, "", parent, items ) )
+        if( processFace( TopoDS::Face( subShape ), data, NULL, "", pptr, items ) )
             ret = true;
-
-        bool processFace( const TopoDS_Face& face, DATA& data, Quantity_Color* color,
-                  const std::string& id, SGNODE* parent, std::vector< SGNODE* >* items );
 
         ++nFaces;
     }
     
     tab( tlvl );
     std::cout << "* " << nFaces << " faces\n";
-    */
+    
+    if( !ret )
+        childNode.Destroy();
+    else if( NULL != items )
+        items->push_back( pptr );
 
     return ret;
 }
