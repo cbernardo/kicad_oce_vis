@@ -76,6 +76,9 @@
  * 
  */
 
+static Quantity_Color gColor;
+
+
 std::string getShapeType( TopAbs_ShapeEnum stype )
 {
     switch( stype )
@@ -160,10 +163,7 @@ struct DATA
             while( sC != eC )
             {
                 if( NULL == S3D::GetSGNodeParent( sC->second ) )
-                {
-                    std::cout << "(destroy " << sC->second << ")\n";
                     S3D::DestroyNode( sC->second );
-                }
 
                 ++sC;
             }
@@ -183,10 +183,7 @@ struct DATA
             while( sF != eF )
             {
                 if( NULL == S3D::GetSGNodeParent( sF->second ) )
-                {
-                    std::cout << "(destroy " << sF->second << ")\n";
                     S3D::DestroyNode( sF->second );
-                }
 
                 ++sF;
             }
@@ -403,11 +400,11 @@ bool getColor( DATA& data, TDF_Label label, Quantity_Color& color )
         }
 
         label = label.Father();
-        
+
         if( label.IsNull() )
             break;
     };
-    
+
     return false;
 }
 
@@ -437,11 +434,10 @@ void addItems( SGNODE* parent, std::vector< SGNODE* >* lp )
 }
 
 
-bool processFace( const TopoDS_Face& face, DATA& data, Quantity_Color* color,
+bool processFace( const TopoDS_Shape& face, DATA& data, Quantity_Color* color,
                   const std::string& id, SGNODE* parent, std::vector< SGNODE* >* items );
 
-
-bool processShell( DATA& data, const TopoDS_Shape& shape, Quantity_Color* color, int tlvl,
+bool processShell( DATA& data, const TopoDS_Shape& shape, int tlvl,
                    SGNODE* parent, std::vector< SGNODE* >* items )
 {
     int nFaces = 0;
@@ -453,7 +449,7 @@ bool processShell( DATA& data, const TopoDS_Shape& shape, Quantity_Color* color,
     {
         const TopoDS_Face& face = TopoDS::Face( tree.Current() );
 
-        if( processFace( face, data, color, "", parent, items ) )
+        if( processFace( face, data, NULL, "", parent, items ) )
             ret = true;
 
         ++nFaces;
@@ -465,32 +461,25 @@ bool processShell( DATA& data, const TopoDS_Shape& shape, Quantity_Color* color,
     return ret;
 }
 
+bool inspect( DATA& data, const TopoDS_Shape& shape, int tlvl, SGNODE* parent,
+              std::vector< SGNODE* >* items );
 
 bool processSolid( DATA& data, const TopoDS_Shape& shape, int tlvl,
                    SGNODE* parent, std::vector< SGNODE* >* items )
 {
     int nShells = 0;
     bool ret = false;
-    TopExp_Explorer tree;
-    tree.Init( shape, TopAbs_SHELL );
-
-    TDF_Label label;
-    data.m_assy->FindShape( shape, label );
-    
-    Quantity_Color col;
-    Quantity_Color* lcolor = NULL;
-    
-    if( getColor( data, label, col ) )
-        lcolor = &col;
-    
     IFSG_TRANSFORM childNode( parent );
     SGNODE* pptr = childNode.GetRawPtr();
-   
+    
+    TopExp_Explorer tree;
+    tree.Init( shape, TopAbs_SHELL );
+    
     for( ; tree.More(); tree.Next() )
     {
         const TopoDS_Shape& subShape = tree.Current();
 
-        if( processShell( data, subShape, lcolor, tlvl + 1, pptr, items ) )
+        if( processShell( data, subShape, tlvl + 1, pptr, items ) )
             ret = true;
 
         ++nShells;
@@ -590,7 +579,7 @@ bool processCompound( DATA& data, const TopoDS_Shape& shape, int tlvl,
         const TopoDS_Shape& subShape = tree.Current();
 
         // XXX - do we have a color?
-        if( processShell( data, subShape, NULL, tlvl + 1, pptr, items ) )
+        if( processShell( data, subShape, tlvl + 1, pptr, items ) )
             ret = true;
 
         ++nShells;
@@ -601,13 +590,12 @@ bool processCompound( DATA& data, const TopoDS_Shape& shape, int tlvl,
 
     int nFaces = 0;
     tree.Init( shape, TopAbs_FACE, TopAbs_SHELL );
-
+    
     for( ; tree.More(); tree.Next() )
     {
         const TopoDS_Shape& subShape = tree.Current();
 
-        // XXX - do we have a color?
-        if( processFace( TopoDS::Face( subShape ), data, NULL, "", pptr, items ) )
+        if( processFace( subShape, data, NULL, "", pptr, items ) )
             ret = true;
 
         ++nFaces;
@@ -660,22 +648,21 @@ bool inspect( DATA& data, const TopoDS_Shape& shape, int tlvl, SGNODE* parent,
                 
             case TopAbs_SHELL:
                 // XXX - no color?
-                if( processShell( data, shape, NULL, tlvl, parent, items ) )
+                if( processShell( data, shape, tlvl, parent, items ) )
                     ret = true;
                 break;
                 
             case TopAbs_FACE:
-                do
-                {
-                    Quantity_Color col;
-                    Quantity_Color* lcolor = NULL;
-                    
-                    if( getColor( data, aLabel, col ) )
-                        lcolor = &col;
+            {
+                Quantity_Color col;
+                Quantity_Color* lcolor = NULL;
 
-                    if( processFace( TopoDS::Face( shape ), data, lcolor, partID, parent, items ) )
-                        ret = true;
-                } while( 0 );
+                if( getColor( data, aLabel, col ) )
+                    lcolor = &col;
+
+                if( processFace( shape, data, lcolor, partID, parent, items ) )
+                    ret = true;
+            }
                 break;
 
             default:
@@ -738,7 +725,6 @@ bool inspect( DATA& data, const TopoDS_Shape& shape, int tlvl, SGNODE* parent,
     std::cout << "* CHILD\n";
 
     std::vector< SGNODE* > itemList;
-
     TDF_ChildIterator it;
     
     for( it.Initialize( aLabel ); it.More(); it.Next() )
@@ -748,8 +734,17 @@ bool inspect( DATA& data, const TopoDS_Shape& shape, int tlvl, SGNODE* parent,
         if( !data.m_assy->GetShape( it.Value(), subShape ) )
             continue;
 
-        if( inspect( data, subShape, tlvl+1, pptr, &itemList ) )
+        if( TopAbs_SOLID == subShape.ShapeType() )
+        {
+            if( processSolid( data, subShape, tlvl + 1, pptr, &itemList ) )
             ret = true;
+        }
+        else
+        {
+            if( inspect( data, subShape, tlvl+1, pptr, &itemList ) )
+                ret = true;
+        }
+
     }
     
     if( ret )
@@ -848,15 +843,6 @@ bool readSTEP( Handle(TDocStd_Document)& m_doc, const char* fname )
         return false;
     }
 
-    /*
-    if( !Interface_Static::SetCVal( "read.step.resource.name", "" )
-        || !Interface_Static::SetCVal( "read.step.sequence", "FromSTEP" ) )
-    {
-        std::cout << " * ERROR: cannot deactivate STEP shape healing\n";
-        return false;
-    }
-    */
-
     // set other translation options
     reader.SetColorMode(true);  // use model colors
     reader.SetNameMode(false);  // don't use label names
@@ -944,12 +930,13 @@ int main( int argc, char** argv )
 }
 
 
-bool processFace( const TopoDS_Face& face, DATA& data, Quantity_Color* color,
-    const std::string& id, SGNODE* parent, std::vector< SGNODE* >* items )
+bool processFace( const TopoDS_Shape& shape, DATA& data, Quantity_Color* color,
+                  const std::string& id, SGNODE* parent, std::vector< SGNODE* >* items )
 {
-    if( face.IsNull() == Standard_True)
+    if( shape.IsNull() )
         return false;
 
+    const TopoDS_Face& face = TopoDS::Face( shape ); 
     SGNODE* ashape = NULL;
     
     if( !id.empty() )
@@ -983,7 +970,23 @@ bool processFace( const TopoDS_Face& face, DATA& data, Quantity_Color* color,
 
     if( triangulation.IsNull() == Standard_True )
         return false;
-    
+
+    Quantity_Color lcolor;
+
+    // if the shape is not assigned a color, check if the face has a color
+    if( NULL == color )
+    {
+        TDF_Label L;
+
+        if( data.m_color->ShapeTool()->Search( face, L ) )
+        {
+            if( data.m_color->GetColor( L, XCAFDoc_ColorGen, lcolor )
+                || data.m_color->GetColor(L, XCAFDoc_ColorCurv, lcolor )
+                || data.m_color->GetColor(L, XCAFDoc_ColorSurf, lcolor ) )
+                color = &lcolor;
+        }
+    }
+
     SGNODE* ocolor = data.GetColor( color );
     
     // create a SHAPE and attach the color and data,
