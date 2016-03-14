@@ -89,8 +89,10 @@ target_compile_definitions( kicad_3dsg PRIVATE -DCOMPILE_SGLIB )
 
 target_link_libraries( kicad_3dsg ${wxWidgets_LIBRARIES} )
 
+if( INSTALL_LIB )
 install( TARGETS
     kicad_3dsg
     DESTINATION ${KICAD_LIB}
     COMPONENT binary
     )
+endif()
