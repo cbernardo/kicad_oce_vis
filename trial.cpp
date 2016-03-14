@@ -1052,6 +1052,10 @@ bool processFace( const TopoDS_Face& face, DATA& data, Quantity_Color* color,
     coordIdx.SetIndices( indices.size(), &indices[0] );
     vface.CalcNormals( NULL );
     vshape.SetParent( parent );
+
+    if( !id.empty() )
+        data.faces.insert( std::pair< std::string,
+            SGNODE* >( id, vshape.GetRawPtr() ) );
     
     // The outer surface of an IGES model is indeterminate so
     // we must render both sides of a surface.
