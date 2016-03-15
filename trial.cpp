@@ -50,12 +50,13 @@
 
 #include "plugins/3dapi/ifsg_all.h"
 
-// precision for mesh creation; this should be good enough for ECAD viewing
-#define USER_PREC (0.07)
+// precision for mesh creation; 0.07 should be good enough for ECAD viewing
+#define USER_PREC (0.14)
 // angular deflection for meshing
 // 10 deg (36 faces per circle) = 0.17453293
 // 20 deg (18 faces per circle) = 0.34906585
-#define USER_ANGLE (0.34906585)
+// 30 deg (12 faces per circle) = 0.52359878
+#define USER_ANGLE (0.52359878)
 
 
 /*
@@ -76,6 +77,12 @@
  * 
  */
 
+
+typedef std::map< Standard_Real, SGNODE* > COLORMAP;
+typedef std::map< std::string, SGNODE* >   FACEMAP;
+typedef std::map< std::string, std::vector< SGNODE* > > NODEMAP;
+typedef std::pair< std::string, std::vector< SGNODE* > > NODEITEM;
+
 struct DATA;
 
 bool processNode( const TopoDS_Shape& shape, DATA& data, SGNODE* parent,
@@ -87,58 +94,6 @@ bool processComp( const TopoDS_Shape& shape, DATA& data, SGNODE* parent,
 bool processFace( const TopoDS_Face& face, DATA& data, SGNODE* parent,
     std::vector< SGNODE* >* items, Quantity_Color* color );
 
-
-std::string getShapeType( TopAbs_ShapeEnum stype )
-{
-    switch( stype )
-    {
-        case TopAbs_COMPOUND:
-            return "COMPOUND";
-            break;
-            
-        case TopAbs_COMPSOLID:
-            return "COMPSOLID";
-            break;
-            
-        case TopAbs_SOLID:
-            return "SOLID";
-            break;
-            
-        case TopAbs_SHELL:
-            return "SHELL";
-            break;
-            
-        case TopAbs_FACE:
-            return "FACE";
-            break;
-            
-        case TopAbs_WIRE:
-            return "WIRE";
-            break;
-            
-        case TopAbs_EDGE:
-            return "EDGE";
-            break;
-            
-        case TopAbs_VERTEX:
-            return "VERTEX";
-            break;
-            
-        case TopAbs_SHAPE:
-            return "SHAPE";
-            break;
-            
-        default:
-            break;
-    }
-    
-    return "UNKNOWN";
-}
-
-typedef std::map< Standard_Real, SGNODE* > COLORMAP;
-typedef std::map< std::string, SGNODE* >   FACEMAP;
-typedef std::map< std::string, std::vector< SGNODE* > > NODEMAP;
-typedef std::pair< std::string, std::vector< SGNODE* > > NODEITEM;
 
 struct DATA
 {
@@ -152,13 +107,15 @@ struct DATA
     COLORMAP colors;    // SGAPPEARANCE nodes
     FACEMAP  faces;     // SGSHAPE items representing a TopoDS_FACE
     bool renderBoth;
-    
+    bool hasSolid;      // set to true if there is a parent solid
+
     DATA()
     {
         scene = NULL;
         defaultColor = NULL;
         refColor.SetValues( Quantity_NOC_BLACK );
         renderBoth = false;
+        hasSolid = false;
     }
 
     ~DATA()
@@ -447,6 +404,7 @@ bool processShell( const TopoDS_Shape& shape, DATA& data, SGNODE* parent,
 bool processSolid( const TopoDS_Shape& shape, DATA& data, SGNODE* parent,
     std::vector< SGNODE* >* items )
 {
+    data.hasSolid = true;
     TDF_Label label = data.m_assy->FindShape( shape, Standard_False );
 
     if( label.IsNull() )
@@ -542,6 +500,7 @@ bool processComp( const TopoDS_Shape& shape, DATA& data, SGNODE* parent,
     {
         const TopoDS_Shape& subShape = it.Value();
         TopAbs_ShapeEnum stype = subShape.ShapeType();
+        data.hasSolid = false;
 
         switch( stype )
         {
@@ -585,12 +544,12 @@ bool processNode( const TopoDS_Shape& shape, DATA& data, SGNODE* parent,
 {
     TopAbs_ShapeEnum stype = shape.ShapeType();
     bool ret = false;
+    data.hasSolid = false;
 
     switch( stype )
     {
         case TopAbs_COMPOUND:
         case TopAbs_COMPSOLID:
-            cout << "*** processNode()\n";
             if( processComp( shape, data, parent, items ) )
                 ret = true;
             break;
@@ -772,6 +731,7 @@ bool processFace( const TopoDS_Face& face, DATA& data, SGNODE* parent,
     if( Standard_True == face.IsNull() )
         return false;
 
+    bool reverse = ( face.Orientation() == TopAbs_REVERSED );
     SGNODE* ashape = NULL;
     std::string partID;
     TDF_Label label;
@@ -781,6 +741,13 @@ bool processFace( const TopoDS_Face& face, DATA& data, SGNODE* parent,
 
     if( !partID.empty() )
         ashape = data.GetFace( partID );
+
+    bool showTwoSides = false;
+
+    // for IGES renderBoth = TRUE; for STEP if a shell or face is not a descendant
+    // of a SOLID then hasSolid = false and we must render both sides
+    if( data.renderBoth || !data.hasSolid )
+        showTwoSides = true;
 
     if( ashape )
     {
@@ -792,7 +759,7 @@ bool processFace( const TopoDS_Face& face, DATA& data, SGNODE* parent,
         if( NULL != items )
             items->push_back( ashape );
 
-        if( data.renderBoth )
+        if( showTwoSides )
         {
             std::string id2 = partID;
             id2.append( "b" );
@@ -858,8 +825,6 @@ bool processFace( const TopoDS_Face& face, DATA& data, SGNODE* parent,
 
     const TColgp_Array1OfPnt&    arrPolyNodes = triangulation->Nodes();
     const Poly_Array1OfTriangle& arrTriangles = triangulation->Triangles();
-    Standard_Boolean isReverse = (face.Orientation() == TopAbs_REVERSED);
-    
     std::vector< SGPOINT > vertices;
     std::vector< int > indices;
     std::vector< int > indices2;
@@ -877,7 +842,7 @@ bool processFace( const TopoDS_Face& face, DATA& data, SGNODE* parent,
         arrTriangles( i ).Get( a, b, c );
         a--;
 
-        if(isReverse)
+        if( reverse )
         {
             int tmp = b - 1;
             b = c - 1;
@@ -891,7 +856,7 @@ bool processFace( const TopoDS_Face& face, DATA& data, SGNODE* parent,
         indices.push_back( b );
         indices.push_back( c );
 
-        if( data.renderBoth )
+        if( showTwoSides )
         {
             indices2.push_back( b );
             indices2.push_back( a );
@@ -910,7 +875,7 @@ bool processFace( const TopoDS_Face& face, DATA& data, SGNODE* parent,
     
     // The outer surface of an IGES model is indeterminate so
     // we must render both sides of a surface.
-    if( data.renderBoth )
+    if( showTwoSides )
     {
         std::string id2 = partID;
         id2.append( "b" );
