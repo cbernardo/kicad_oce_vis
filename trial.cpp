@@ -5,6 +5,7 @@
 #include <sstream>
 #include <string>
 #include <cstring>
+#include <cmath>
 #include <map>
 #include <vector>
 
@@ -70,11 +71,7 @@
  *      TopoDS_Shell: contains Faces
  *  
  *  There are lower level entities which are not of interest to non-MCAD applications
- * 
- *  Each entity type which may represent an assembly may contain Children. If
- *  an entity type is not an assembly then it shall contain objects but no Children
- *  and the TopExp_Explorer tool must be used to traverse the structure.
- * 
+ *
  */
 
 
@@ -82,6 +79,31 @@ typedef std::map< Standard_Real, SGNODE* > COLORMAP;
 typedef std::map< std::string, SGNODE* >   FACEMAP;
 typedef std::map< std::string, std::vector< SGNODE* > > NODEMAP;
 typedef std::pair< std::string, std::vector< SGNODE* > > NODEITEM;
+
+enum FormatType
+{
+    FMT_NONE = 0,
+    FMT_STEP = 1,
+    FMT_IGES = 2
+};
+
+// VRML conversion parameters
+struct PARAMS
+{
+    FormatType format;
+    double deflection;
+    double angleIncrement;
+    bool   useHierarchy;
+    std::string inputFile;
+    std::string outputFile;
+};
+
+#define DEFAULT_OUT "output.wrl"
+
+// note: getopt would make life easier but there is no guarantee
+// of its availability
+bool processArgs( int argc, const char** argv, PARAMS& args );
+
 
 struct DATA;
 
@@ -223,9 +245,9 @@ struct DATA
                 return defaultColor;
             
             IFSG_APPEARANCE app( true );
-            app.SetShininess( 0.1 );
-            app.SetSpecular( 0.12, 0.12, 0.12 );
-            app.SetAmbient( 0.1, 0.1, 0.1 );
+            app.SetShininess( 0.05 );
+            app.SetSpecular( 0.04, 0.04, 0.04 );
+            app.SetAmbient( 0.04, 0.04, 0.04 );
             app.SetDiffuse( 0.6,0.6, 0.6 );
             
             defaultColor = app.GetRawPtr();
@@ -248,14 +270,6 @@ struct DATA
         
         return app.GetRawPtr();
     }
-};
-
-
-enum FormatType
-{
-    FMT_NONE = 0,
-    FMT_STEP = 1,
-    FMT_IGES = 2    
 };
 
 
@@ -657,32 +671,59 @@ bool readSTEP( Handle(TDocStd_Document)& m_doc, const char* fname )
 }
 
 
-int main( int argc, char** argv )
+void printUsage()
 {
-    if( argc != 2 )
+    std::cout << "\n* Usage: oce_vis {-h} {-d val} {-a val} {-o outputfile} inputfile\n";
+    std::cout << "  -h: if present, produces a hierarchical output employing DEF/USE\n";
+    std::cout << "  -d: max. surface deflection (mm), default ";
+    std::cout << USER_PREC << " \n";
+    std::cout << "      range: 0.0001 .. 0.8\n";
+    std::cout << "  -a: max. angular increment (degrees), default ";
+    std::cout << USER_ANGLE*180.0/M_PI << " deg.\n";
+    std::cout << "      range: -45 .. -5 and 5 .. 45 deg\n";
+    std::cout << "  -o: output file; must end in .wrl\n";
+    std::cout << "  inputfile: input model; must be IGES or STEP AP203/214/242\n\n";
+}
+
+
+int main( int argc, const char** argv )
+{
+    PARAMS args;
+
+    if( argc < 2 || !processArgs( argc, argv, args ) )
+    {
+        printUsage();
         return -1;
-    
+    }
+
+    std::cout << "Processing file: " << args.inputFile << "\n";
+    std::cout << "    deflection (mm): " << args.deflection << "\n";
+    std::cout << "    angle (deg): " << args.angleIncrement * 180.0 / M_PI << "\n";
+    std::cout << "    hierarchy: " << args.useHierarchy << "\n";
+    std::cout << "    output file: " << args.outputFile << "\n";
+
     DATA data;
 
     Handle(XCAFApp_Application) m_app = XCAFApp_Application::GetApplication();
     m_app->NewDocument( "MDTV-XCAF", data.m_doc );
     
-    switch( fileType( argv[1] ) )
+    switch( args.format )
     {
         case FMT_IGES:
             data.renderBoth = true;
             
-            if( !readIGES( data.m_doc, argv[1] ) )
+            if( !readIGES( data.m_doc, args.inputFile.c_str() ) )
                 return -1;
             break;
             
         case FMT_STEP:
-            if( !readSTEP( data.m_doc, argv[1] ) )
+            if( !readSTEP( data.m_doc, args.inputFile.c_str() ) )
                 return -1;
             break;
             
         default:
             std::cout << "File is not an IGES or STEP file\n";
+            std::cout << "filename: " << args.inputFile << "\n";
             return -1;
             break;
     }
@@ -712,14 +753,18 @@ int main( int argc, char** argv )
         ++id;
     };
 
-    // set to true to make extensive use of DEF/USE; otherwise
-    // the output is a flat hierarchy compatible with the
-    // legacy kicad VRML parser
-    bool useHierarchy = true;
-
     // on success write out a VRML file
-    if( ret )
-        S3D::WriteVRML( "test.wrl", true, data.scene, useHierarchy, true );
+    if( ret && S3D::WriteVRML( args.outputFile.c_str(), true, data.scene,
+                               args.useHierarchy, true ) )
+    {
+        std::cout << "* VRML translation written to '";
+        std::cout << args.outputFile.c_str() << "'\n";
+    }
+    else
+    {
+        std::cout << "* could not process input file '";
+        std::cout << args.inputFile.c_str() << "'\n";
+    }
 
     return 0;
 }
@@ -893,6 +938,314 @@ bool processFace( const TopoDS_Face& face, DATA& data, SGNODE* parent,
         if( !partID.empty() )
             data.faces.insert( std::pair< std::string,
                 SGNODE* >( id2, vshape2.GetRawPtr() ) );
+    }
+
+    return true;
+}
+
+
+enum ARGSTATE
+{
+    ARGNONE = 0,    // default machine state
+    ARGDEF,         // need to read deflection
+    ARGANG,         // need to read angle
+    ARGOUT          // need to read output filename (MUST end in '.wrl')
+};
+
+#define hasInput 1
+#define hasHier  2
+#define hasDef   4
+#define hasAng   8
+#define hasOut   16
+#define hasAll   31
+
+bool processTok( const char* tok, PARAMS& args, ARGSTATE& state,
+    unsigned char& flags );
+
+bool processArgs( int argc, const char** argv, PARAMS& args )
+{
+    ARGSTATE state = ARGNONE;
+    int argnum = 1;
+    unsigned char flags = 0;
+
+    args.outputFile.clear();
+    args.inputFile.clear();
+    args.deflection = USER_PREC;
+    args.angleIncrement = USER_ANGLE;
+    args.useHierarchy = false;
+    args.format = FMT_NONE;
+
+    if( argc <= argnum )
+    {
+        std::cout << "Not enough arguments; we need at least an input file name\n";
+        return false;
+    }
+
+    while( argnum < argc && hasAll != flags )
+    {
+        if( !processTok( argv[argnum], args, state, flags ) )
+            return false;
+
+        ++argnum;
+    }
+
+    if( hasAll == flags && argnum < argc )
+    {
+        std::cout << "* Extra arguments (ignored): ";
+
+        while( argnum < argc )
+            std::cout << argv[argnum++] << " ";
+
+        std::cout << std::endl;
+    }
+
+    if( args.inputFile.empty() )
+        return false;
+
+    if( args.outputFile.empty() )
+        args.outputFile = DEFAULT_OUT;
+
+    if( !args.outputFile.compare( args.inputFile ) )
+    {
+        std::cout << "* input and output files are the same\n";
+        args.outputFile.clear();
+        return false;
+    }
+
+    args.format = fileType( args.inputFile.c_str() );
+    return true;
+}
+
+bool processDef( const char* tok, PARAMS& args, ARGSTATE& state,
+    unsigned char& flags );
+
+bool processAng( const char* tok, PARAMS& args, ARGSTATE& state,
+    unsigned char& flags );
+
+bool processOut( const char* tok, PARAMS& args, ARGSTATE& state,
+    unsigned char& flags );
+
+bool processOpt( const char* tok, PARAMS& args, ARGSTATE& state,
+    unsigned char& flags );
+
+
+bool processTok( const char* tok, PARAMS& args, ARGSTATE& state,
+    unsigned char& flags )
+{
+    switch( state )
+    {
+        case ARGNONE:
+            if( tok[0] != '-' )
+            {
+                // input file
+                if( args.inputFile.empty() )
+                {
+                    args.inputFile = tok;
+                    flags |= hasInput;
+                }
+                else
+                {
+                    std::cout << "* ERROR: multiple input filenames\n";
+                }
+            }
+            else if( !processOpt( tok, args, state, flags ) )
+                    return false;
+
+            break;
+
+        case ARGDEF:
+            if( !processDef( tok, args, state, flags ) )
+                return false;
+
+            break;
+
+        case ARGANG:
+            if( !processAng( tok, args, state, flags ) )
+                return false;
+
+            break;
+
+        case ARGOUT:
+            if( !processOut( tok, args, state, flags ) )
+                return false;
+
+            break;
+
+        default:
+            return false;
+            break;
+    }
+
+    return true;
+}
+
+
+bool processDef( const char* tok, PARAMS& args, ARGSTATE& state,
+    unsigned char& flags )
+{
+    if( (flags & hasDef) )
+    {
+        std::cout << "* duplicate deflection definition\n";
+        return false;
+    }
+
+    double defl = 0.0;
+
+    std::istringstream istr;
+    istr.str( tok );
+    istr >> defl;
+
+    if( istr.fail() || defl < 0.0001 || defl > 0.8 )
+    {
+        std::cout << "* invalid deflection value: '" << tok << "'\n";
+        return false;
+    }
+
+    args.deflection = defl;
+    flags |= hasDef;
+    state = ARGNONE;
+    return true;
+}
+
+
+bool processAng( const char* tok, PARAMS& args, ARGSTATE& state,
+    unsigned char& flags )
+{
+    if( (flags & hasAng) )
+    {
+        std::cout << "* duplicate angle increment definition\n";
+        return false;
+    }
+
+    double angl = 0.0;
+
+    std::istringstream istr;
+    istr.str( tok );
+    istr >> angl;
+
+    if( istr.fail() || angl < -45.0 || angl > 45.0
+        || std::fabs( angl ) < 5.0 )
+    {
+        std::cout << "* invalid angle increment value: '" << tok << "'\n";
+        std::cout << "* must be 5 <= abs( angle ) <= 45\n";
+        return false;
+    }
+
+    args.angleIncrement = angl * M_PI / 180.0;
+    flags |= hasAng;
+    state = ARGNONE;
+    return true;
+}
+
+
+bool processOut( const char* tok, PARAMS& args, ARGSTATE& state,
+    unsigned char& flags )
+{
+    if( (flags & hasOut) )
+    {
+        std::cout << "* duplicate output file definitions\n";
+        return false;
+    }
+
+    args.outputFile = tok;
+    size_t nc = args.outputFile.size();
+
+    if( nc < 4 || args.outputFile.find( ".wrl" ) != nc - 4 )
+    {
+        args.outputFile = DEFAULT_OUT;
+        std::cout << "* Invalid output file: '" << tok << "'\n";
+        std::cout << "* using default: '" << args.outputFile << "'\n";
+    }
+
+    flags |= hasOut;
+    state = ARGNONE;
+    return true;
+}
+
+
+bool processOpt( const char* tok, PARAMS& args, ARGSTATE& state,
+    unsigned char& flags )
+{
+    switch( tok[1] )
+    {
+        case 'h':
+            if( tok[2] == 0 )
+            {
+                if( (flags & hasHier) )
+                {
+                    std::cout << "* double of switch '-h'\n";
+                    return false;
+                }
+
+                args.useHierarchy = true;
+                state = ARGNONE;
+                flags |= hasHier;
+            }
+            else
+            {
+                std::cout << "* unexpected switch + value: '";
+                std::cout << tok << "'\n";
+            }
+            break;
+
+        case 'd':
+            if( tok[2] == 0 )
+            {
+                if( (flags & hasDef) )
+                {
+                    std::cout << "* double of switch '-d'\n";
+                    return false;
+                }
+
+                state = ARGDEF;
+            }
+            else
+            {
+                if( !processDef( &tok[2], args, state, flags ) )
+                    return false;
+            }
+            break;
+
+        case 'a':
+            if( tok[2] == 0 )
+            {
+                if( (flags & hasAng) )
+                {
+                    std::cout << "* double of switch '-a'\n";
+                    return false;
+                }
+
+                state = ARGANG;
+            }
+            else
+            {
+                if( !processAng( &tok[2], args, state, flags ) )
+                    return false;
+            }
+            break;
+
+        case 'o':
+            if( tok[2] == 0 )
+            {
+                if( (flags & hasOut) )
+                {
+                    std::cout << "* double of switch '-o'\n";
+                    return false;
+                }
+
+                state = ARGOUT;
+            }
+            else
+            {
+                if( !processOut( &tok[2], args, state, flags ) )
+                    return false;
+            }
+            break;
+
+        default:
+            std::cout << "* Unexpected option: '" << tok << "'\n";
+            return false;
+            break;
     }
 
     return true;
