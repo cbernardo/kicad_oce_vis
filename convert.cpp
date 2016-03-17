@@ -1,4 +1,26 @@
-// Dummy of process to translate IGES to SCENEGRAPH
+/*
+ * This program source code file is part of oce_vis, a STEP/IGES
+ * to VRML2 converter.
+ *
+ * Copyright (C) 2016 Cirilo Bernardo <cirilo.bernardo@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License
+ * as published by the Free Software Foundation; either version 2
+ * of the License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, you may find one here:
+ * http://www.gnu.org/licenses/old-licenses/gpl-2.0.html
+ * or you may search the http://www.gnu.org website for the version 2 license,
+ * or you may write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
+ */
 
 #include <iostream>
 #include <fstream>
@@ -94,6 +116,7 @@ struct PARAMS
     double deflection;
     double angleIncrement;
     bool   useHierarchy;
+    bool   useNormals;
     std::string inputFile;
     std::string outputFile;
 };
@@ -130,6 +153,7 @@ struct DATA
     FACEMAP  faces;     // SGSHAPE items representing a TopoDS_FACE
     bool renderBoth;
     bool hasSolid;      // set to true if there is a parent solid
+    bool useNorms;      // set to true to calculate normals for the VRML file
 
     DATA()
     {
@@ -138,6 +162,7 @@ struct DATA
         refColor.SetValues( Quantity_NOC_BLACK );
         renderBoth = false;
         hasSolid = false;
+        useNorms = false;
     }
 
     ~DATA()
@@ -673,8 +698,9 @@ bool readSTEP( Handle(TDocStd_Document)& m_doc, const char* fname )
 
 void printUsage()
 {
-    std::cout << "\n* Usage: oce_vis {-h} {-d val} {-a val} {-o outputfile} inputfile\n";
+    std::cout << "\n* Usage: oce_vis {-h} {-n} {-d val} {-a val} {-o outputfile} inputfile\n";
     std::cout << "  -h: if present, produces a hierarchical output employing DEF/USE\n";
+    std::cout << "  -n: if present, calculates surface normals\n";
     std::cout << "  -d: max. surface deflection (mm), default ";
     std::cout << USER_PREC << " \n";
     std::cout << "      range: 0.0001 .. 0.8\n";
@@ -700,9 +726,11 @@ int main( int argc, const char** argv )
     std::cout << "    deflection (mm): " << args.deflection << "\n";
     std::cout << "    angle (deg): " << args.angleIncrement * 180.0 / M_PI << "\n";
     std::cout << "    hierarchy: " << args.useHierarchy << "\n";
+    std::cout << "    normals: " << args.useNormals << "\n";
     std::cout << "    output file: " << args.outputFile << "\n";
 
     DATA data;
+    data.useNorms = args.useNormals;
 
     Handle(XCAFApp_Application) m_app = XCAFApp_Application::GetApplication();
     m_app->NewDocument( "MDTV-XCAF", data.m_doc );
@@ -911,7 +939,10 @@ bool processFace( const TopoDS_Face& face, DATA& data, SGNODE* parent,
 
     vcoords.SetCoordsList( vertices.size(), &vertices[0] );
     coordIdx.SetIndices( indices.size(), &indices[0] );
-    vface.CalcNormals( NULL );
+
+    if( data.useNorms )
+        vface.CalcNormals( NULL );
+
     vshape.SetParent( parent );
 
     if( !partID.empty() )
@@ -932,7 +963,10 @@ bool processFace( const TopoDS_Face& face, DATA& data, SGNODE* parent,
 
         vcoords2.SetCoordsList( vertices.size(), &vertices[0] );
         coordIdx2.SetIndices( indices2.size(), &indices2[0] );
-        vface2.CalcNormals( NULL );
+
+        if( data.useNorms )
+            vface2.CalcNormals( NULL );
+
         vshape2.SetParent( parent );
 
         if( !partID.empty() )
@@ -954,10 +988,11 @@ enum ARGSTATE
 
 #define hasInput 1
 #define hasHier  2
-#define hasDef   4
-#define hasAng   8
-#define hasOut   16
-#define hasAll   31
+#define hasNorms 4
+#define hasDef   8
+#define hasAng   16
+#define hasOut   32
+#define hasAll   63
 
 bool processTok( const char* tok, PARAMS& args, ARGSTATE& state,
     unsigned char& flags );
@@ -973,6 +1008,7 @@ bool processArgs( int argc, const char** argv, PARAMS& args )
     args.deflection = USER_PREC;
     args.angleIncrement = USER_ANGLE;
     args.useHierarchy = false;
+    args.useNormals = false;
     args.format = FMT_NONE;
 
     if( argc <= argnum )
@@ -1180,6 +1216,26 @@ bool processOpt( const char* tok, PARAMS& args, ARGSTATE& state,
                 args.useHierarchy = true;
                 state = ARGNONE;
                 flags |= hasHier;
+            }
+            else
+            {
+                std::cout << "* unexpected switch + value: '";
+                std::cout << tok << "'\n";
+            }
+            break;
+
+        case 'n':
+            if( tok[2] == 0 )
+            {
+                if( (flags & hasNorms) )
+                {
+                    std::cout << "* double of switch '-n'\n";
+                    return false;
+                }
+
+                args.useNormals = true;
+                state = ARGNONE;
+                flags |= hasNorms;
             }
             else
             {

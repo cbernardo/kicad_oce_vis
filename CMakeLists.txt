@@ -345,7 +345,7 @@ include_directories( include scenegraph ${wxWidgets_INCLUDE_DIRS} )
 add_subdirectory( scenegraph/3d_cache/sg )
 
 include_directories( ${OCE_INCLUDE_DIRS} )
-add_executable( oce_vis trial.cpp )
+add_executable( oce_vis convert.cpp )
 target_link_libraries( oce_vis kicad_3dsg ${LIBS_OCE} )
 
 install( TARGETS
