@@ -264,7 +264,7 @@ add_custom_target( lib-dependencies )
 #
 # Find GLM library, required
 #
-find_package( GLM 0.9.6.0 REQUIRED )
+find_package( GLM 0.9.5.1 REQUIRED )
 
 set( LIBS_OCE PTKernel TKBin TKBinL TKBinXCAF TKBO
     TKBool TKBRep TKCAF TKCDF TKFeat TKFillet TKG2d TKG3d TKGeomAlgo
