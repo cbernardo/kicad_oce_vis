@@ -25,6 +25,11 @@ set( CMAKE_VISIBILITY_INLINES_HIDDEN ON )
 set( CMAKE_POSITION_INDEPENDENT_CODE ON )
 
 
+# Global setting: Use C++11
+set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+
 # CMP0063: CMake < 3.3 does not handle hidden visibility for static libraries,
 # and 3.3 is backwards compatible when the minimum version is smaller than 3.3.
 if( POLICY CMP0063 )
