@@ -446,17 +446,24 @@ bool processSolid( const TopoDS_Shape& shape, DATA& data, SGNODE* parent,
     data.hasSolid = true;
     TDF_Label label = data.m_assy->FindShape( shape, Standard_False );
 
-    if( label.IsNull() )
-        return false;
-
     std::string partID;
-    getTag( label, partID );
-
     Quantity_Color col;
     Quantity_Color* lcolor = NULL;
 
-    if( getColor( data, label, col ) )
-        lcolor = &col;
+    if( label.IsNull() )
+    {
+        static int i = 0;
+        std::ostringstream ostr;
+        ostr << "KMISC_" << i++;
+        partID = ostr.str();
+    }
+    else
+    {
+        getTag(label, partID);
+
+        if( getColor( data, label, col ) )
+            lcolor = &col;
+    }
 
     TopoDS_Iterator it;
     IFSG_TRANSFORM childNode( parent );
@@ -512,11 +519,6 @@ bool processSolid( const TopoDS_Shape& shape, DATA& data, SGNODE* parent,
 bool processComp( const TopoDS_Shape& shape, DATA& data, SGNODE* parent,
     std::vector< SGNODE* >* items )
 {
-    TDF_Label label = data.m_assy->FindShape( shape, Standard_False );
-
-    if( label.IsNull() )
-        return false;
-
     TopoDS_Iterator it;
     IFSG_TRANSFORM childNode( parent );
     SGNODE* pptr = childNode.GetRawPtr();
@@ -774,7 +776,7 @@ int main( int argc, const char** argv )
     while( id <= nshapes )
     {
         TopoDS_Shape shape = data.m_assy->GetShape( frshapes.Value(id) );
-        
+
         if ( !shape.IsNull() && processNode( shape, data, data.scene, NULL ) )
             ret = true;
 
